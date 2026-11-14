@@ -21,15 +21,51 @@ environment. No provider needs to expose an Anthropic endpoint.
 - API keys in the OS keyring (Windows Credential Manager, macOS Keychain, Secret Service) with an explicit local-file fallback.
 - Single static binary. No Python, no Node, no telemetry.
 
-## Install
+## Install (Windows)
 
-Requires Go 1.27+ to build and Claude Code installed (`claude` on `PATH`).
+One line in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/SKhman1/claude-custom/main/install.ps1 | iex
+```
+
+If the repository is private, run this instead (requires the `gh` CLI and `gh auth login`):
+
+```powershell
+gh api repos/SKhman1/claude-custom/contents/install.ps1 -H "Accept: application/vnd.github.raw" | iex
+```
+
+The installer:
+
+1. Checks Windows, PowerShell, and CPU architecture.
+2. Checks for Claude Code and installs it with npm (installing Node.js LTS via winget first if needed).
+3. Downloads the latest `claude-custom` release binary for your architecture.
+4. Installs it to `%LOCALAPPDATA%\claude-custom\bin` and adds that directory to your user `PATH`.
+5. Starts `claude-custom setup`.
+
+Nothing else has to be installed by hand — no Go toolchain, no manual config.
+
+To install without launching setup, save the script and run:
+
+```powershell
+.\install.ps1 -SkipSetup
+```
+
+### Build from source
+
+Requires Go 1.27+ and Claude Code installed (`claude` on `PATH`).
+
+```powershell
+.\build.ps1
+```
+
+Or manually:
 
 ```powershell
 go build -trimpath -ldflags "-s -w" -o bin\claude-custom.exe .\cmd\claude-custom
 ```
 
-Put `bin\claude-custom.exe` somewhere on your `PATH`. On macOS/Linux:
+On macOS/Linux:
 
 ```sh
 go build -trimpath -ldflags "-s -w" -o bin/claude-custom ./cmd/claude-custom
@@ -119,13 +155,11 @@ Environment variables:
 
 ```powershell
 go vet ./...
-go test ./...
 go build ./...
 ```
 
 The proxy package (`internal/proxy`) contains the translation, admission,
-retry/fallback, and stream recovery logic and is covered by tests that run
-against an in-process fake upstream.
+retry/fallback, and stream recovery logic.
 
 ## License
 

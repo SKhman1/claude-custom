@@ -29,12 +29,6 @@ One line in PowerShell:
 irm https://raw.githubusercontent.com/SKhman1/claude-custom/main/install.ps1 | iex
 ```
 
-If the repository is private, run this instead (requires the `gh` CLI and `gh auth login`):
-
-```powershell
-gh api repos/SKhman1/claude-custom/contents/install.ps1 -H "Accept: application/vnd.github.raw" | iex
-```
-
 The installer:
 
 1. Checks Windows, PowerShell, and CPU architecture.

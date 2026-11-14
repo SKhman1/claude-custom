@@ -1,0 +1,24 @@
+# build output
+/bin/
+*.exe
+*.test
+*.out
+
+# runtime state (never commit; lives in ~/.claude-custom by default)
+/logs/
+*.log
+config.json
+run.json
+secrets.json
+*.bak
+*.bak-*
+
+# local env
+.env
+.env.*
+
+# editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

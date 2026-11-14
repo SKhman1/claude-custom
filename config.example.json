@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "default_profile": "default",
+  "profiles": {
+    "default": {
+      "provider": "openrouter",
+      "model": "cohere/north-mini-code:free",
+      "limits": {
+        "max_concurrency": 2,
+        "requests_per_window": 4,
+        "window_seconds": 2
+      },
+      "fallbacks": [
+        "groq/openai/gpt-oss-20b"
+      ],
+      "context_window": 256000,
+      "max_output_tokens": 16384
+    }
+  },
+  "providers": {
+    "openrouter": {
+      "preset": "openrouter",
+      "base_url": "https://openrouter.ai/api/v1",
+      "key_ref": "claude-custom/openrouter"
+    },
+    "groq": {
+      "preset": "groq",
+      "base_url": "https://api.groq.com/openai/v1",
+      "key_ref": "claude-custom/groq"
+    }
+  },
+  "server": {
+    "bind": "127.0.0.1",
+    "port": 8787
+  }
+}

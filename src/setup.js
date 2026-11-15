@@ -52,33 +52,6 @@ function contextLabel(tokens) {
   return `${tokens} context`;
 }
 
-function modelDetail(model) {
-  let detail = model.name || "";
-  if (detail.toLowerCase() === model.id.toLowerCase()) detail = "";
-  const context = contextLabel(model.contextWindow);
-  if (context) detail = detail ? `${detail}  ${context}` : context;
-  return detail;
-}
-
-async function promptModelsForSession(models, chosenId, preselect) {
-  if (!models.length) return [chosenId];
-  const items = models.map((model) => ({ label: model.id, detail: modelDetail(model), value: model.id }));
-  const wanted = new Set([chosenId]);
-  for (const id of Array.isArray(preselect) ? preselect : []) wanted.add(String(id));
-  const defaults = [];
-  for (let i = 0; i < items.length; i++) {
-    if (wanted.has(items[i].value)) defaults.push(i);
-  }
-  let picks = await prompt.chooseMulti(
-    "Models to show inside Claude Code (space toggles, enter confirms)",
-    items,
-    defaults.length ? defaults : [0],
-    { search: true, pageSize: 14 }
-  );
-  if (!picks || !picks.length) picks = defaults.length ? defaults : [0];
-  return picks.map((index) => models[index].id);
-}
-
 async function promptModelWithDefault(models, current) {
   const selected = String(current || "").trim();
   if (!models.length) return prompt.ask("Model ID", selected);
@@ -195,7 +168,6 @@ async function setupCommand(args) {
 
   let model = String(flags.model || "").trim();
   if (!model) model = await promptModelWithDefault(models, "");
-  const sessionModels = await promptModelsForSession(models, model, cfg.profiles[name] && cfg.profiles[name].models);
 
   const limits = config.withDefaults(preset.limits || config.defaultLimits());
 
@@ -209,7 +181,6 @@ async function setupCommand(args) {
       window_seconds: limits.window_seconds,
     },
   };
-  if (sessionModels && sessionModels.length) profile.models = sessionModels;
   const fallbacks = [];
   for (const raw of String(flags.fallbacks || "").split(",")) {
     const ref = raw.trim();

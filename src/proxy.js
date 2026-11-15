@@ -654,43 +654,16 @@ class ProxyServer {
         created_at: "2026-01-01T00:00:00Z",
       },
     ];
-    const seen = new Set(["claude-custom", "claude-sonnet-4-5"]);
-    const curated = Array.isArray(this.profile.models) ? this.profile.models.filter((id) => id && !seen.has(id)) : null;
-    if (curated && curated.length) {
-      for (const id of curated) {
-        if (seen.has(id)) continue;
-        seen.add(id);
-        items.push({ id, type: "model", display_name: id, created_at: "2026-01-01T00:00:00Z" });
-      }
-      for (const fallback of this.fallbacks) {
-        const id = `${fallback.name}/${fallback.model}`;
-        if (seen.has(id)) continue;
-        seen.add(id);
-        items.push({ id, type: "model", display_name: `${id} (fallback)`, created_at: "2026-01-01T00:00:00Z" });
-      }
-      this.writeJSON(res, 200, {
-        data: items,
-        has_more: false,
-        first_id: items[0].id,
-        last_id: items[items.length - 1].id,
-      });
-      return;
-    }
-    for (const fallback of this.fallbacks) {
-      const id = `${fallback.name}/${fallback.model}`;
-      items.push({ id, type: "model", display_name: `${id} (fallback)`, created_at: "2026-01-01T00:00:00Z" });
-      seen.add(id);
-    }
     const live = catalog.filterChat(await this.liveModels());
-    for (const model of live) {
-      if (seen.has(model.id)) continue;
-      seen.add(model.id);
-      items.push({
-        id: model.id,
+    for (const model of this.syntheticList(live)) {
+      const item = {
+        id: model.alias,
         type: "model",
-        display_name: model.name,
+        display_name: model.id,
         created_at: "2026-01-01T00:00:00Z",
-      });
+      };
+      if (model.name && model.name !== model.id) item.description = model.name;
+      items.push(item);
     }
     this.writeJSON(res, 200, {
       data: items,
@@ -726,8 +699,43 @@ class ProxyServer {
     return models;
   }
 
-  isProfileModel(id) {
-    return Array.isArray(this.profile.models) && this.profile.models.includes(id);
+  slugify(id) {
+    const slug = String(id)
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, "-")
+      .replace(/-{2,}/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48);
+    return slug || "model";
+  }
+
+  syntheticList(models) {
+    const used = new Set();
+    const out = [];
+    for (const model of models) {
+      const base = this.slugify(model.id);
+      let alias = `anthropic--${base}`;
+      let n = 2;
+      while (used.has(alias)) {
+        alias = `anthropic--${base}-${n}`;
+        n += 1;
+      }
+      used.add(alias);
+      out.push({ alias, id: model.id, name: model.name });
+    }
+    return out;
+  }
+
+  isSynthetic(id) {
+    return typeof id === "string" && id.startsWith("anthropic--");
+  }
+
+  async liveModelByAlias(requested) {
+    const live = catalog.filterChat(await this.liveModels());
+    for (const model of this.syntheticList(live)) {
+      if (model.alias === requested) return model.id;
+    }
+    return null;
   }
 
   knownLiveModel(id) {
@@ -786,12 +794,17 @@ class ProxyServer {
     return [this.primaryTarget(), ...this.fallbacks];
   }
 
-  targetsFor(requested) {
+  async targetsFor(requested) {
     if (isClaudeAlias(requested)) return this.messageTargets();
+    if (this.isSynthetic(requested)) {
+      const real = await this.liveModelByAlias(requested);
+      if (real) return [Object.assign(this.primaryTarget(), { model: real })];
+      return this.messageTargets();
+    }
     for (const fallback of this.fallbacks) {
       if (requested === `${fallback.name}/${fallback.model}`) return [fallback];
     }
-    if (this.isProfileModel(requested) || this.knownLiveModel(requested)) {
+    if (this.knownLiveModel(requested)) {
       return [Object.assign(this.primaryTarget(), { model: requested })];
     }
     return this.messageTargets();
@@ -913,7 +926,7 @@ class ProxyServer {
   }
 
   async jsonMessages(res, chatReq, chatModel, requested, signal) {
-    const targets = this.targetsFor(requested);
+    const targets = await this.targetsFor(requested);
     let limitStatus = 0;
     let limitBody = "";
     let skipped = 0;
@@ -991,7 +1004,7 @@ class ProxyServer {
   }
 
   async streamMessages(res, chatReq, chatModel, requested, signal) {
-    const targets = this.targetsFor(requested);
+    const targets = await this.targetsFor(requested);
     let response = null;
     let body = "";
     let target = null;

@@ -3,6 +3,7 @@
 const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
+const paths = require("./paths.js");
 
 class NotFoundError extends Error {
   constructor() {
@@ -79,6 +80,7 @@ function env(baseEnv, proxyURL, token, contextWindow) {
     out.push(entry);
   }
   out.push(
+    `CLAUDE_CONFIG_DIR=${paths.cliDir()}`,
     `ANTHROPIC_BASE_URL=${proxyURL}`,
     `ANTHROPIC_AUTH_TOKEN=${token}`,
     "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1",
@@ -117,6 +119,11 @@ function commandFor(exe, args) {
 
 function run(exe, args, childEnv, options) {
   if (!exe) return Promise.reject(new NotFoundError());
+  try {
+    fs.mkdirSync(paths.cliDir(), { recursive: true, mode: 0o700 });
+  } catch (_) {
+    // best effort: claude will create it if missing
+  }
   const spec = commandFor(exe, args);
   const opts = options || {};
   return new Promise((resolve, reject) => {

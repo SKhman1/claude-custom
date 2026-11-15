@@ -12,15 +12,16 @@ environment. No provider needs to expose an Anthropic endpoint.
 
 ## Features
 
-- One command from install to a working session; pick provider, API key, and the models you want visible, then Claude Code launches — nothing to run afterwards.
-- `/model` inside Claude Code lists exactly the models you picked at setup; switch between them live, no restart.
+- One command from install to a working session; guided provider/API key/default model picker on first use.
+- `/model` inside a claude-custom session lists your provider's catalog live, routed to the provider — no restart, no config file surgery.
+- Completely separate Claude Code environment: `claude` runs with `CLAUDE_CONFIG_DIR=~/.claude-custom/cli`, so its settings, theme, model memory, sessions and plugins live in claude-custom's state, never in your own `~/.claude`.
 - Anthropic Messages and SSE streaming translated to OpenAI Chat Completions, including tools, images, and reasoning passthrough.
 - Per-provider admission control, retries with jittered backoff, `Retry-After` handling, and a circuit breaker.
 - Automatic failover across an ordered list of `provider/model` fallbacks; rate-limited or unavailable providers are skipped instead of failing the session.
 - Stream recovery: early holdback plus continuation requests to survive mid-stream disconnects.
 - Claude Code timeout/watchdog overrides so long generations and long sessions are not cut off.
 - API keys in the OS keyring (Windows Credential Manager, macOS Keychain, Secret Service) with an explicit local-file fallback.
-- Single static binary, or an npm build that runs inside signed `node.exe` where unsigned executables are blocked. No Python, no telemetry.
+- Single npm package, no Python, no binaries to sign, no telemetry.
 
 ## Install (Windows)
 
@@ -32,13 +33,13 @@ irm https://raw.githubusercontent.com/SKhman1/claude-custom/main/install.ps1 | i
 
 That is the whole installation. The script:
 
-1. Installs Claude Code if it is missing (Node.js LTS via winget first, if needed).
-2. Installs `claude-custom` to `%LOCALAPPDATA%\claude-custom\bin` and adds it to your user `PATH`.
-3. Starts claude-custom: pick a provider, paste an API key, pick the default model, then pick which of your provider's models you want visible inside Claude Code.
-4. Claude Code launches in that same command; you are already in a session.
+1. Installs Node.js LTS with winget when it is missing (both Claude Code and claude-custom run on Node).
+2. Installs Claude Code if it is missing.
+3. Installs `claude-custom` from npm (the signed `node.exe` runs it, so Windows Application Control never blocks it) and adds its launcher folder to your user `PATH`.
+4. Starts claude-custom: pick a provider, paste an API key, pick a default model.
+5. Claude Code launches in that same command; you are already in a session.
 
-When the wizard ends you are already in a working Claude Code session. After
-that, one command is enough:
+After installing, one command is enough:
 
 ```powershell
 claude-custom        # reuse the saved profile, launch Claude Code
@@ -52,85 +53,55 @@ Non-interactive install (skip the wizard, e.g. for provisioning):
 .\install.ps1 -SkipSetup
 ```
 
-If Windows Application Control (Smart App Control, WDAC, AppLocker) blocks
-unsigned executables, the installer switches to the npm build automatically,
-which runs inside signed `node.exe` and is allowed. Full details are under
-[Troubleshooting](#troubleshooting).
-
 ### npm instead of the script
 
-The same build is on npm:
-
-```powershell
-npm install -g claude-custom
-claude-custom setup
-```
-
-### Build from source
-
-Requires Go 1.27+ and Claude Code installed (`claude` on `PATH`).
-
-```powershell
-.\build.ps1
-```
-
-Or manually:
-
-```powershell
-go build -trimpath -ldflags "-s -w" -o bin\claude-custom.exe .\cmd\claude-custom
-```
-
-On macOS/Linux:
-
-```sh
-go build -trimpath -ldflags "-s -w" -o bin/claude-custom ./cmd/claude-custom
-```
-
-## Troubleshooting
-
-**"An Application Control policy has blocked this file"**
-
-Windows Smart App Control, WDAC, or AppLocker is refusing the prebuilt
-unsigned binary. The installer handles this automatically: it first downloads
-the Go toolchain and builds claude-custom locally, which these policies
-generally allow. If the locally built binary is blocked too, it installs the
-Node.js build instead — `node.exe` is signed, so policy allows running
-claude-custom inside it. You can force either route directly:
-
-```powershell
-.\install.ps1 -BuildFromSource
-.\install.ps1 -Runtime node
-```
-
-If neither route works and the machine has no Node.js, the installer prints the
-policy state and the SHA-256 so IT can add an allow rule. Path-based AppLocker
-policies can instead be satisfied by installing elsewhere from an elevated
-PowerShell:
-
-```powershell
-.\install.ps1 -InstallDir "C:\Program Files\claude-custom"
-```
-
-The Node.js build is on npm, so it can be installed without the script too:
+The same package is on npm:
 
 ```powershell
 npm install -g claude-custom
 claude-custom
 ```
 
+### PATH troubleshooting for existing installs
+
+The installer verifies what `PATH` resolves and prints the full resolution
+order. If an older `claude-custom` shadows the new one, upgrade it:
+
+```powershell
+npm install -g claude-custom@latest    # npm-global copy
+# or remove it and reopen the terminal
+```
+
+## Troubleshooting
+
+**"An Application Control policy has blocked this file"**
+
+The Node package is the only build we distribute. `claude-custom.cmd` is a
+tiny batch shim over signed `node.exe`, so Smart App Control, WDAC and
+AppLocker allow it by default. If you see this error on a machine where
+`node.exe` itself is blocked (rare, organization policy), there is nothing the
+installer can do: ask IT to allow `node.exe`, or use WSL.
+
+**`claude-custom` reports the wrong version**
+
+An older copy is earlier on your `PATH`. The installer prints the full
+resolution order when it finishes, showing which entry wins. Common shadows:
+a global npm install at `%AppData%\npm` (upgrade with
+`npm install -g claude-custom@latest`), or an outdated copy in
+`%LOCALAPPDATA%\claude-custom\bin` (rerun the installer; it refreshes exactly
+that copy).
+
 **Node.js build differences**
 
-The Node.js build behaves like the binary, with two differences: API keys are
-stored in `~/.claude-custom/secrets.json` instead of the Windows Credential
-Manager (keys saved there by the binary are still read automatically), and
+API keys are stored in `~/.claude-custom/secrets.json` instead of the Windows Credential
+Manager (keys saved there by the old binary are still read automatically), and
 `HTTP(S)_PROXY` environment variables are not honored.
 
 **`claude-custom` is not recognized**
 
 The installer appends its folder to your user `PATH`; already-open terminals
 do not see the change. Open a new terminal, or run the full path
-`%LOCALAPPDATA%\claude-custom\bin\claude-custom.exe` (or `claude-custom.cmd`
-for the Node.js build).
+`%LOCALAPPDATA%\claude-custom\bin\claude-custom.cmd`.
 
 ## Quick start
 
@@ -144,27 +115,27 @@ claude-custom setup          # change provider or model
 
 The first-run picker asks for a provider and a model with arrow keys, `↑`/`↓` to move and type to search, validates your key, and saves a profile. Nothing is preselected.
 
-## Models inside Claude Code
+## Isolated environment
 
-During setup you also pick which models appear in Claude Code's `/model`
-(space toggles, Enter confirms; the default model is preselected). The list is
-saved in your profile and served by the local proxy at `/v1/models`, so Claude
-Code's picker shows exactly your selection, nothing else:
-
-```powershell
-claude-custom            # pick provider / key / default model / visible models, then Claude Code starts
-```
-
-Inside any session:
+`claude-custom` launches Claude Code with its own config home:
 
 ```
-/model                   # list your selected models and switch live
+CLAUDE_CONFIG_DIR=~/.claude-custom/cli
 ```
 
-The proxy routes the chosen model to the provider on the next message — no
-restart, no config editing. `claude-sonnet-4-5` and `claude-custom` remain as
-aliases for the profile's default model. Profiles saved before this release
-have no curated list and keep the full live model list.
+Everything Claude Code keeps — settings, theme, plugins, session history,
+its `settings.json`, and what you pick in `/model` — lives under
+`~/.claude-custom/cli`, exactly the same as a second install of Claude Code.
+Your real `~/.claude` (or `%USERPROFILE%\.claude`) and `claude` in the
+terminal behave byte-for-byte like they always have. Uninstalling claude-custom
+leaves no trace in your own Claude Code configuration.
+
+The catalog `/model` shows inside a claude-custom session comes from the
+provider's `/models` endpoint, live. Its ids appear as `anthropic--<name>`
+with the real model id shown as the display name because Claude Code's
+gateway discovery only accepts ids containing `claude` or `anthropic` — a
+CLI-side filter, not a claude-custom choice. `claude-custom` and
+`claude-sonnet-4-5` are aliases for your profile's default model.
 
 ## Commands
 
@@ -210,6 +181,7 @@ State lives outside the repository:
 | Path | Contents |
 | --- | --- |
 | `~/.claude-custom/config.json` | Profiles, providers, server settings |
+| `~/.claude-custom/cli/` | Claude Code config home for claude-custom sessions (`CLAUDE_CONFIG_DIR`) |
 | `~/.claude-custom/run.json` | Runtime state of the running proxy |
 | `~/.claude-custom/logs/proxy.log` | Proxy log |
 | OS keyring (`service=claude-custom`) | API keys |
@@ -225,6 +197,7 @@ Environment variables:
 | `CLAUDE_CUSTOM_PROFILE` | Override the default profile |
 | `CLAUDE_CUSTOM_PORT` | Override the proxy port |
 | `CLAUDE_CUSTOM_<PROVIDER>_KEY` | Supply a provider key (wins over keyring) |
+| `CLAUDE_CONFIG_DIR` | Not set by you: claude-custom always launches Claude Code with `$CLAUDE_CUSTOM_HOME/cli` |
 
 ## Security
 
@@ -238,12 +211,12 @@ Environment variables:
 ## Development
 
 ```powershell
-go vet ./...
-go build ./...
+node --check src/proxy.js   # or any file in src/
 ```
 
-The proxy package (`internal/proxy`) contains the translation, admission,
-retry/fallback, and stream recovery logic.
+`src/` is the reference implementation (the npm package and the installer).
+`internal/` is the older Go implementation kept for reference; the released
+binary in `bin/` is not rebuilt from it anymore.
 
 ## License
 

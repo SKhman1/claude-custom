@@ -25,8 +25,12 @@ function runPath() {
   return path.join(dir(), "run.json");
 }
 
+function cliDir() {
+  return path.join(dir(), "cli");
+}
+
 function logPath() {
   return path.join(dir(), "logs", "proxy.log");
 }
 
-module.exports = { dir, configPath, secretsPath, runPath, logPath, DIR_NAME };
+module.exports = { dir, configPath, secretsPath, runPath, logPath, cliDir, DIR_NAME };

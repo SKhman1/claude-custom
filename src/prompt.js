@@ -142,60 +142,11 @@ async function choose(title, items, defaultIndex, options) {
   }
 }
 
-async function chooseMulti(title, items, defaultIndices, options) {
-  if (!items.length) return [];
-  const tui = require("./tui.js");
-  const settings = options || {};
-  const def = Array.isArray(defaultIndices) ? defaultIndices : [];
-  if (tui.tuiAvailable()) {
-    try {
-      return await tui.selectMenu({
-        title,
-        items,
-        defaultSelected: def,
-        search: settings.search !== false,
-        pageSize: settings.pageSize,
-        multiple: true,
-      });
-    } catch (err) {
-      if (err && err.code === "CANCELED") throw new CancelledError();
-      throw err;
-    }
-  }
-  const keep = new Set(def);
-  process.stdout.write(`${title}\n`);
-  items.forEach((item, index) => {
-    const label = typeof item === "string" ? item : item.label;
-    const detail = typeof item === "string" ? "" : item.detail;
-    const mark = keep.has(index) ? "[x]" : "[ ]";
-    process.stdout.write(`  ${index + 1}. ${mark} ${label}${detail ? `  ${detail}` : ""}\n`);
-  });
-  const hint = keep.size ? [...keep].map((i) => i + 1).join(", ") : "all";
-  for (;;) {
-    const answer = String(await ask("Numbers to keep, comma-separated (Enter keeps current)", hint)).trim();
-    if (!answer) return [...keep].sort((a, b) => a - b);
-    const picks = new Set();
-    let valid = true;
-    for (const token of answer.split(/[,\s]+/)) {
-      if (!token) continue;
-      const n = Number.parseInt(token, 10);
-      if (!Number.isInteger(n) || n < 1 || n > items.length) {
-        valid = false;
-        break;
-      }
-      picks.add(n - 1);
-    }
-    if (valid) return [...picks].sort((a, b) => a - b);
-    process.stdout.write(`Numbers must be between 1 and ${items.length}.\n`);
-  }
-}
-
 module.exports = {
   CancelledError,
   ask,
   askSecret,
   confirm,
   choose,
-  chooseMulti,
   close,
 };

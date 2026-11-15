@@ -69,19 +69,23 @@ go build -trimpath -ldflags "-s -w" -o bin/claude-custom ./cmd/claude-custom
 
 **"An Application Control policy has blocked this file"**
 
-Windows Smart App Control, WDAC, or AppLocker is refusing to run the unsigned
-release binary. The installer detects this case and prints the current policy
-state plus the SHA-256 hash. Options:
+Windows Smart App Control, WDAC, or AppLocker is refusing the prebuilt
+unsigned binary. The installer handles this automatically: it downloads the Go
+toolchain and builds claude-custom locally, which these policies generally
+allow. You can also force that route directly:
 
-1. Allow it in Windows Security → App & browser control → Smart App Control, or
-   ask IT to allow the file hash.
-2. Install into a folder the policy allows, from an elevated PowerShell:
+```powershell
+.\install.ps1 -BuildFromSource
+```
 
-   ```powershell
-   .\install.ps1 -InstallDir "C:\Program Files\claude-custom"
-   ```
+If the machine blocks locally built binaries too, the installer prints the
+policy state and the SHA-256 so IT can add an allow rule. Path-based AppLocker
+policies can instead be satisfied by installing elsewhere from an elevated
+PowerShell:
 
-3. Run Claude Code on WSL or another machine without the policy.
+```powershell
+.\install.ps1 -InstallDir "C:\Program Files\claude-custom"
+```
 
 **`claude-custom` is not recognized**
 

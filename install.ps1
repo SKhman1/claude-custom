@@ -325,10 +325,12 @@ function Build-FromSource([string]$Tag) {
         $env:CGO_ENABLED = "0"
         $env:GOTELEMETRY = "off"
         $env:GOFLAGS = ""
+        $version = if ($Tag -match "^(v\d|main)") { $Tag } else { "dev" }
+        if ($version -eq "main") { $version = "dev" }
         Say "    Building claude-custom locally (this takes a moment)"
         Push-Location $root.FullName
         try {
-            & $go build -trimpath -ldflags "-s -w" -o $target ./cmd/claude-custom 2>&1 | ForEach-Object { Say "    $_" }
+            & $go build -trimpath -ldflags "-s -w -X claude-custom/internal/cli.Version=$version" -o $target ./cmd/claude-custom 2>&1 | ForEach-Object { Say "    $_" }
             if ($LASTEXITCODE -ne 0) { Stop-Install "the local build failed (exit $LASTEXITCODE)" }
         } finally {
             Pop-Location

@@ -67,6 +67,17 @@ function Stop-Install([string]$Message) {
     throw [System.InvalidOperationException]::new($Message)
 }
 
+function Invoke-Native([string]$File, [string[]]$Arguments, [switch]$Echo) {
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & $File @Arguments 2>&1 | ForEach-Object { if ($Echo) { Say "    $_" } }
+        return $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+}
+
 function Test-Admin {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($identity)
@@ -83,6 +94,8 @@ function Test-ProtectedDir([string]$Path) {
 
 function Invoke-VersionCheck([string]$Exe) {
     $result = [pscustomobject]@{ Ok = $false; Output = $null; Blocked = $false; Error = $null }
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     try {
         $out = & $Exe version 2>&1
         $code = $LASTEXITCODE
@@ -95,6 +108,8 @@ function Invoke-VersionCheck([string]$Exe) {
         $result.Error = if ($text) { $text } else { "exit code $code" }
     } catch {
         $result.Error = $_.Exception.Message
+    } finally {
+        $ErrorActionPreference = $previous
     }
     if ($result.Error -match "Application Control|blocked this file|0x800704EC|0x800704E5") {
         $result.Blocked = $true
@@ -208,9 +223,9 @@ function Ensure-ClaudeCode {
             Stop-Install "Claude Code needs Node.js (npm) and neither npm nor winget was found. Install Node.js LTS from https://nodejs.org, reopen the terminal, and rerun this installer."
         }
         Say "    Node.js is not installed; installing Node.js LTS with winget."
-        & winget install --id OpenJS.NodeJS.LTS -e --silent --accept-source-agreements --accept-package-agreements
-        if ($LASTEXITCODE -ne 0) {
-            Stop-Install "winget failed to install Node.js (exit $LASTEXITCODE). Install Node.js LTS from https://nodejs.org and rerun this installer."
+        $wingetCode = Invoke-Native "winget" @("install", "--id", "OpenJS.NodeJS.LTS", "-e", "--silent", "--accept-source-agreements", "--accept-package-agreements")
+        if ($wingetCode -ne 0) {
+            Stop-Install "winget failed to install Node.js (exit $wingetCode). Install Node.js LTS from https://nodejs.org and rerun this installer."
         }
         Refresh-Path
         $npm = Get-Command npm -ErrorAction SilentlyContinue
@@ -220,9 +235,9 @@ function Ensure-ClaudeCode {
     }
 
     Say "    Running: npm install -g @anthropic-ai/claude-code"
-    & npm install -g "@anthropic-ai/claude-code"
-    if ($LASTEXITCODE -ne 0) {
-        Stop-Install "npm failed to install Claude Code (exit $LASTEXITCODE)."
+    $npmCode = Invoke-Native "npm" @("install", "-g", "@anthropic-ai/claude-code")
+    if ($npmCode -ne 0) {
+        Stop-Install "npm failed to install Claude Code (exit $npmCode)."
     }
     Refresh-Path
     $claude = Find-Claude
@@ -330,8 +345,9 @@ function Build-FromSource([string]$Tag) {
         Say "    Building claude-custom locally (this takes a moment)"
         Push-Location $root.FullName
         try {
-            & $go build -trimpath -ldflags "-s -w -X claude-custom/internal/cli.Version=$version" -o $target ./cmd/claude-custom 2>&1 | ForEach-Object { Say "    $_" }
-            if ($LASTEXITCODE -ne 0) { Stop-Install "the local build failed (exit $LASTEXITCODE)" }
+            $goFlags = "-s -w -X claude-custom/internal/cli.Version=$version"
+            $buildCode = Invoke-Native $go @("build", "-trimpath", "-ldflags", $goFlags, "-o", $target, "./cmd/claude-custom") -Echo
+            if ($buildCode -ne 0) { Stop-Install "the local build failed (exit $buildCode)" }
         } finally {
             Pop-Location
         }

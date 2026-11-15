@@ -655,6 +655,27 @@ class ProxyServer {
       },
     ];
     const seen = new Set(["claude-custom", "claude-sonnet-4-5"]);
+    const curated = Array.isArray(this.profile.models) ? this.profile.models.filter((id) => id && !seen.has(id)) : null;
+    if (curated && curated.length) {
+      for (const id of curated) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+        items.push({ id, type: "model", display_name: id, created_at: "2026-01-01T00:00:00Z" });
+      }
+      for (const fallback of this.fallbacks) {
+        const id = `${fallback.name}/${fallback.model}`;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        items.push({ id, type: "model", display_name: `${id} (fallback)`, created_at: "2026-01-01T00:00:00Z" });
+      }
+      this.writeJSON(res, 200, {
+        data: items,
+        has_more: false,
+        first_id: items[0].id,
+        last_id: items[items.length - 1].id,
+      });
+      return;
+    }
     for (const fallback of this.fallbacks) {
       const id = `${fallback.name}/${fallback.model}`;
       items.push({ id, type: "model", display_name: `${id} (fallback)`, created_at: "2026-01-01T00:00:00Z" });
@@ -703,6 +724,10 @@ class ProxyServer {
     this.modelsFetchedAt = Date.now();
     this.modelsFailedAt = 0;
     return models;
+  }
+
+  isProfileModel(id) {
+    return Array.isArray(this.profile.models) && this.profile.models.includes(id);
   }
 
   knownLiveModel(id) {
@@ -766,7 +791,7 @@ class ProxyServer {
     for (const fallback of this.fallbacks) {
       if (requested === `${fallback.name}/${fallback.model}`) return [fallback];
     }
-    if (this.knownLiveModel(requested)) {
+    if (this.isProfileModel(requested) || this.knownLiveModel(requested)) {
       return [Object.assign(this.primaryTarget(), { model: requested })];
     }
     return this.messageTargets();

@@ -501,6 +501,9 @@ async function doctorCommand() {
       process.stdout.write(`  profile:    ${cfg.default_profile}\n`);
       process.stdout.write(`  provider:   ${profile.provider} (${resolved.provider.base_url})\n`);
       process.stdout.write(`  model:      ${profile.model}\n`);
+      if (Array.isArray(profile.models) && profile.models.length) {
+        process.stdout.write(`  in /model:  ${profile.models.length} model(s) selectable in Claude Code\n`);
+      }
       process.stdout.write(`  key source: ${keystore.source(profile.provider)}\n`);
       try {
         for (const target of resolveFallbacks(cfg, cfg.default_profile, profile)) {
@@ -885,7 +888,6 @@ async function defaultCommand() {
       if (err instanceof prompt.CancelledError) return;
       throw err;
     }
-    await launchClaude();
     return;
   }
 
@@ -903,7 +905,6 @@ async function defaultCommand() {
       if (err instanceof prompt.CancelledError) return;
       throw err;
     }
-    await launchClaude();
     return;
   }
   if (choice.name !== cfg.default_profile) {

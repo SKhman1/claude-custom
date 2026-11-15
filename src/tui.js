@@ -81,7 +81,7 @@ function labelWidth(rows) {
   return Math.min(width, 56);
 }
 
-function renderMenu(title, rows, query, cursor, offset, options) {
+function renderMenu(title, rows, query, cursor, offset, options, checked) {
   const lines = [`${ui.cyan("?")} ${ui.bold(title)}`];
   if (options.search && query) lines.push(`  ${ui.dim("search: ")}${query}`);
   lines.push("");
@@ -92,7 +92,9 @@ function renderMenu(title, rows, query, cursor, offset, options) {
     const marker = i === cursor ? ui.cyan("❯ ") : "  ";
     const label = i === cursor ? ui.bold(item.label) : item.label;
     const padding = Math.max(width - [...item.label].length, 2);
-    let line = marker + label + " ".repeat(padding);
+    let line = marker;
+    if (options.multiple) line += checked.has(rows[i].index) ? ui.green("[x] ") : ui.dim("[ ] ");
+    line += label + " ".repeat(padding);
     if (item.detail) line += ui.dim(item.detail);
     lines.push(line);
   }
@@ -102,9 +104,15 @@ function renderMenu(title, rows, query, cursor, offset, options) {
     lines.push(`  ${ui.dim(`${first}-${end} of ${rows.length}`)}`);
   }
   lines.push("");
-  const hint = options.search
-    ? "up/down move  type to search  enter select  ctrl+c cancel"
-    : "up/down move  enter select  ctrl+c cancel";
+  const hint = options.multiple
+    ? [
+        "up/down move  space toggle",
+        options.search ? "  type to search" : "",
+        "  enter confirm  ctrl+c cancel",
+      ].join("")
+    : options.search
+      ? "up/down move  type to search  enter select  ctrl+c cancel"
+      : "up/down move  enter select  ctrl+c cancel";
   lines.push(`  ${ui.dim(hint)}`);
   return lines.map((line) => truncate(line, options.width));
 }
@@ -114,6 +122,7 @@ function decode(buffer) {
   const first = buffer[0];
   if (first === 3) return { event: { kind: "cancel" }, used: 1 };
   if (first === 13 || first === 10) return { event: { kind: "enter" }, used: 1 };
+  if (first === 32) return { event: { kind: "space" }, used: 1 };
   if (first === 127 || first === 8) return { event: { kind: "backspace" }, used: 1 };
   if (first === 27) {
     if (buffer.length < 2) return null;
@@ -147,10 +156,11 @@ function decode(buffer) {
 function selectMenu(spec) {
   const title = String(spec.title || "");
   const items = normalizeItems(spec.items || []);
-  if (!items.length || !tuiAvailable()) return Promise.resolve(-1);
+  if (!items.length || !tuiAvailable()) return Promise.resolve(spec.multiple ? [] : -1);
 
   const options = {
     search: Boolean(spec.search),
+    multiple: Boolean(spec.multiple),
     pageSize: spec.pageSize && spec.pageSize > 0 ? spec.pageSize : 12,
     width: spec.width && spec.width > 0 ? spec.width : process.stdout.columns || 100,
     height: spec.height && spec.height > 0 ? spec.height : process.stdout.rows || 0,
@@ -168,6 +178,12 @@ function selectMenu(spec) {
   let offset = 0;
   let query = "";
   let pending = Buffer.alloc(0);
+  const defaultPicks = Array.isArray(spec.defaultSelected)
+    ? spec.defaultSelected.filter((i) => Number.isInteger(i) && i >= 0 && i < items.length)
+    : Number.isInteger(spec.defaultIndex) && spec.defaultIndex >= 0 && spec.defaultIndex < items.length
+      ? [spec.defaultIndex]
+      : [];
+  const checked = new Set(options.multiple ? defaultPicks : []);
 
   const write = (text) => stdout.write(text);
 
@@ -223,7 +239,7 @@ function selectMenu(spec) {
       clamp(visible);
       switch (event.kind) {
         case "cancel":
-          finish(null, -1, canceledError());
+          finish(null, options.multiple ? [] : -1, canceledError());
           return false;
         case "up":
           if (cursor > 0) cursor -= 1;
@@ -236,6 +252,13 @@ function selectMenu(spec) {
           break;
         case "end":
           if (visible.length) cursor = visible.length - 1;
+          break;
+        case "space":
+          if (options.multiple && visible.length) {
+            const original = visible[cursor].index;
+            if (checked.has(original)) checked.delete(original);
+            else checked.add(original);
+          }
           break;
         case "backspace":
           if (options.search && query) {
@@ -253,6 +276,11 @@ function selectMenu(spec) {
           break;
         case "enter": {
           if (!visible.length) break;
+          if (options.multiple) {
+            const picked = [...checked].sort((a, b) => a - b);
+            finish(`${ui.cyan("?")} ${title}: ${picked.length} selected`, picked);
+            return false;
+          }
           const chosen = visible[cursor];
           finish(`${ui.cyan("?")} ${title}: ${ui.bold(chosen.item.label)}`, chosen.index);
           return false;
@@ -273,23 +301,23 @@ function selectMenu(spec) {
         if (!apply(decoded.event)) return;
         const visible = filterItems(items, query);
         clamp(visible);
-        draw(renderMenu(title, visible, query, cursor, offset, options));
+        draw(renderMenu(title, visible, query, cursor, offset, options, checked));
       }
     };
 
-    const onError = (err) => finish(null, -1, err);
+    const onError = (err) => finish(null, options.multiple ? [] : -1, err);
 
     try {
       stdin.setRawMode(true);
     } catch (_) {
-      resolve(-1);
+      resolve(options.multiple ? [] : -1);
       return;
     }
     stdin.resume();
     write("\u001b[?25l");
     const visible = filterItems(items, query);
     clamp(visible);
-    draw(renderMenu(title, visible, query, cursor, offset, options));
+    draw(renderMenu(title, visible, query, cursor, offset, options, checked));
     stdin.on("data", onData);
     stdin.on("error", onError);
     process.once("exit", () => {
@@ -298,4 +326,8 @@ function selectMenu(spec) {
   });
 }
 
-module.exports = { selectMenu, tuiAvailable, displayWidth, truncate, decode };
+function selectMultiMenu(spec) {
+  return selectMenu(Object.assign({}, spec, { multiple: true }));
+}
+
+module.exports = { selectMenu, selectMultiMenu, tuiAvailable, displayWidth, truncate, decode };

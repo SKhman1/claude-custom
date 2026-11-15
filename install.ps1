@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Installs claude-custom and Claude Code, then starts claude-custom setup.
+  Installs claude-custom and Claude Code, then starts claude-custom (setup, then Claude Code launches).
 
 .DESCRIPTION
   Public repository (one line):
@@ -15,7 +15,8 @@
     3. Downloads the latest claude-custom release binary.
     4. Installs it to %LOCALAPPDATA%\claude-custom\bin (or -InstallDir)
        and adds that folder to PATH.
-    5. Starts `claude-custom setup`.
+    5. Starts claude-custom: pick a provider, an API key, and the models you
+       want visible inside Claude Code; Claude Code then launches automatically.
 
   If Windows Application Control blocks the downloaded binary, the installer
   downloads the Go toolchain and builds claude-custom locally instead, which
@@ -28,7 +29,7 @@
 .PARAMETER BuildFromSource
   Skip the release binary and build claude-custom locally with Go.
 .PARAMETER SkipSetup
-  Install the binary but do not start the interactive setup.
+  Install the binary but do not start claude-custom (no setup, no launch).
 .PARAMETER SkipClaudeCode
   Do not try to install Claude Code when it is missing.
 #>
@@ -491,13 +492,13 @@ try {
         if ($SkipSetup) {
             Step "Done"
             Say "    Skipped setup because -SkipSetup was used." "Yellow"
-            Say "    Start it with: claude-custom setup" "Yellow"
+            Say "    Start it with: claude-custom" "Yellow"
             return
         }
-        Step "Starting claude-custom setup"
+        Step "Starting claude-custom"
         & $shim setup
         Say ""
-        Ok "Setup finished. Launch Claude Code with: claude-custom"
+        Ok "Have a nice session"
         return
     }
 
@@ -545,13 +546,13 @@ try {
                 if ($SkipSetup) {
                     Step "Done"
                     Say "    Skipped setup because -SkipSetup was used." "Yellow"
-                    Say "    Start it with: claude-custom setup" "Yellow"
+                    Say "    Start it with: claude-custom" "Yellow"
                     return
                 }
-                Step "Starting claude-custom setup"
+                Step "Starting claude-custom"
                 & $shim setup
                 Say ""
-                Ok "Setup finished. Launch Claude Code with: claude-custom"
+                Ok "Have a nice session"
                 return
             }
             if ($buildError) { Stop-Install "build from source failed: $($buildError.Exception.Message)" }
@@ -570,13 +571,13 @@ try {
             if ($SkipSetup) {
                 Step "Done"
                 Say "    Skipped setup because -SkipSetup was used." "Yellow"
-                Say "    Start it with: claude-custom setup" "Yellow"
+                Say "    Start it with: claude-custom" "Yellow"
                 return
             }
-            Step "Starting claude-custom setup"
+            Step "Starting claude-custom"
             & $shim setup
             Say ""
-            Ok "Setup finished. Launch Claude Code with: claude-custom"
+            Ok "Have a nice session"
             return
         }
         Show-AppControlHelp $exe
@@ -590,14 +591,14 @@ try {
     if ($SkipSetup) {
         Step "Done"
         Say "    Skipped setup because -SkipSetup was used." "Yellow"
-        Say "    Start it with: claude-custom setup" "Yellow"
+        Say "    Start it with: claude-custom" "Yellow"
         return
     }
 
-    Step "Starting claude-custom setup"
+    Step "Starting claude-custom"
     & $exe setup
     Say ""
-    Ok "Setup finished. Launch Claude Code with: claude-custom"
+    Ok "Have a nice session"
 } catch {
     Say ""
     Say "Install failed: $($_.Exception.Message)" "Red"

@@ -12,7 +12,8 @@ environment. No provider needs to expose an Anthropic endpoint.
 
 ## Features
 
-- One command from install to a working session; guided provider/model picker on first use.
+- One command from install to a working session; pick provider, API key, and the models you want visible, then Claude Code launches — nothing to run afterwards.
+- `/model` inside Claude Code lists exactly the models you picked at setup; switch between them live, no restart.
 - Anthropic Messages and SSE streaming translated to OpenAI Chat Completions, including tools, images, and reasoning passthrough.
 - Per-provider admission control, retries with jittered backoff, `Retry-After` handling, and a circuit breaker.
 - Automatic failover across an ordered list of `provider/model` fallbacks; rate-limited or unavailable providers are skipped instead of failing the session.
@@ -33,8 +34,8 @@ That is the whole installation. The script:
 
 1. Installs Claude Code if it is missing (Node.js LTS via winget first, if needed).
 2. Installs `claude-custom` to `%LOCALAPPDATA%\claude-custom\bin` and adds it to your user `PATH`.
-3. Starts the setup wizard: pick a provider, paste an API key, pick a model.
-4. Launches Claude Code through that provider.
+3. Starts claude-custom: pick a provider, paste an API key, pick the default model, then pick which of your provider's models you want visible inside Claude Code.
+4. Claude Code launches in that same command; you are already in a session.
 
 When the wizard ends you are already in a working Claude Code session. After
 that, one command is enough:
@@ -142,6 +143,28 @@ claude-custom setup          # change provider or model
 ```
 
 The first-run picker asks for a provider and a model with arrow keys, `↑`/`↓` to move and type to search, validates your key, and saves a profile. Nothing is preselected.
+
+## Models inside Claude Code
+
+During setup you also pick which models appear in Claude Code's `/model`
+(space toggles, Enter confirms; the default model is preselected). The list is
+saved in your profile and served by the local proxy at `/v1/models`, so Claude
+Code's picker shows exactly your selection, nothing else:
+
+```powershell
+claude-custom            # pick provider / key / default model / visible models, then Claude Code starts
+```
+
+Inside any session:
+
+```
+/model                   # list your selected models and switch live
+```
+
+The proxy routes the chosen model to the provider on the next message — no
+restart, no config editing. `claude-sonnet-4-5` and `claude-custom` remain as
+aliases for the profile's default model. Profiles saved before this release
+have no curated list and keep the full live model list.
 
 ## Commands
 

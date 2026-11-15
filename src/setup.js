@@ -15,10 +15,11 @@ const SETUP_FLAGS = {
   profile: { type: "string", default: "", usage: "profile name" },
   fallbacks: { type: "string", default: "", usage: "comma-separated provider/model fallbacks" },
   "no-auth": { type: "bool", default: false, usage: "provider needs no API key" },
+  "no-launch": { type: "bool", default: false, usage: "do not launch Claude Code after saving" },
 };
 
 const SETUP_SYNOPSIS =
-  "setup [--provider ID] [--model ID] [--base-url URL] [--profile NAME] [--fallbacks A/B,C/D] [--no-auth]";
+  "setup [--provider ID] [--model ID] [--base-url URL] [--profile NAME] [--fallbacks A/B,C/D] [--no-auth] [--no-launch]";
 
 function isLocalURL(base) {
   const text = String(base || "");
@@ -49,6 +50,33 @@ function contextLabel(tokens) {
     return `${(tokens / 1000).toFixed(1)}k context`;
   }
   return `${tokens} context`;
+}
+
+function modelDetail(model) {
+  let detail = model.name || "";
+  if (detail.toLowerCase() === model.id.toLowerCase()) detail = "";
+  const context = contextLabel(model.contextWindow);
+  if (context) detail = detail ? `${detail}  ${context}` : context;
+  return detail;
+}
+
+async function promptModelsForSession(models, chosenId, preselect) {
+  if (!models.length) return [chosenId];
+  const items = models.map((model) => ({ label: model.id, detail: modelDetail(model), value: model.id }));
+  const wanted = new Set([chosenId]);
+  for (const id of Array.isArray(preselect) ? preselect : []) wanted.add(String(id));
+  const defaults = [];
+  for (let i = 0; i < items.length; i++) {
+    if (wanted.has(items[i].value)) defaults.push(i);
+  }
+  let picks = await prompt.chooseMulti(
+    "Models to show inside Claude Code (space toggles, enter confirms)",
+    items,
+    defaults.length ? defaults : [0],
+    { search: true, pageSize: 14 }
+  );
+  if (!picks || !picks.length) picks = defaults.length ? defaults : [0];
+  return picks.map((index) => models[index].id);
 }
 
 async function promptModelWithDefault(models, current) {
@@ -167,6 +195,7 @@ async function setupCommand(args) {
 
   let model = String(flags.model || "").trim();
   if (!model) model = await promptModelWithDefault(models, "");
+  const sessionModels = await promptModelsForSession(models, model, cfg.profiles[name] && cfg.profiles[name].models);
 
   const limits = config.withDefaults(preset.limits || config.defaultLimits());
 
@@ -180,6 +209,7 @@ async function setupCommand(args) {
       window_seconds: limits.window_seconds,
     },
   };
+  if (sessionModels && sessionModels.length) profile.models = sessionModels;
   const fallbacks = [];
   for (const raw of String(flags.fallbacks || "").split(",")) {
     const ref = raw.trim();
@@ -220,6 +250,16 @@ async function setupCommand(args) {
     process.stdout.write(`Get a key at ${preset.keyURL}\n`);
   }
   process.stdout.write(`${ui.dim("Setup complete.")}\n`);
+  if (!flags["no-launch"] && process.stdin.isTTY && process.stdout.isTTY) {
+    try {
+      const { launchClaude } = require("./commands.js");
+      await launchClaude();
+    } catch (err) {
+      if (err && err.name === "ExitError") throw err;
+      process.stdout.write(`claude-custom: Claude Code did not start (${err && err.message ? err.message : err})\n`);
+      process.stdout.write("Run `claude-custom run` to launch it later.\n");
+    }
+  }
 }
 
 module.exports = { setupCommand, promptModelWithDefault, isLocalURL };

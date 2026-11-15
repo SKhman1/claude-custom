@@ -17,10 +17,16 @@
        and adds that folder to PATH.
     5. Starts `claude-custom setup`.
 
+  If Windows Application Control blocks the downloaded binary, the installer
+  downloads the Go toolchain and builds claude-custom locally instead, which
+  these policies generally allow.
+
 .PARAMETER InstallDir
   Install somewhere else, for example "C:\Program Files\claude-custom".
   Required when a Windows Application Control policy blocks the default
   user-profile location; use an elevated PowerShell for protected folders.
+.PARAMETER BuildFromSource
+  Skip the release binary and build claude-custom locally with Go.
 .PARAMETER SkipSetup
   Install the binary but do not start the interactive setup.
 .PARAMETER SkipClaudeCode
@@ -29,6 +35,7 @@
 [CmdletBinding()]
 param(
     [string]$InstallDir = (Join-Path $env:LOCALAPPDATA "claude-custom\bin"),
+    [switch]$BuildFromSource,
     [switch]$SkipSetup,
     [switch]$SkipClaudeCode
 )
@@ -253,6 +260,88 @@ function Install-Binary([string]$Tag) {
     }
 }
 
+function Get-GoExe {
+    $local = Join-Path $env:LOCALAPPDATA "claude-custom\go\bin\go.exe"
+    if (Test-Path $local) { return $local }
+    $existing = Get-Command go -ErrorAction SilentlyContinue
+    if ($existing) { return $existing.Source }
+    return $null
+}
+
+function Install-GoToolchain {
+    $go = Get-GoExe
+    if ($go) {
+        Ok "Go toolchain found: $go"
+        return $go
+    }
+    Say "    Downloading the Go toolchain (about 90 MB, one time)" "Yellow"
+    $release = $null
+    try {
+        $releases = Invoke-RestMethod -UseBasicParsing -Uri "https://go.dev/dl/?mode=json" -Headers @{ "User-Agent" = "claude-custom-installer" }
+    } catch {
+        Stop-Install "could not reach go.dev to download the Go toolchain. Underlying error: $($_.Exception.Message)"
+    }
+    foreach ($candidate in $releases) {
+        if (-not $candidate.stable) { continue }
+        $file = $candidate.files | Where-Object { $_.os -eq "windows" -and $_.arch -eq "amd64" -and $_.kind -eq "archive" } | Select-Object -First 1
+        if ($file) { $release = $file; break }
+    }
+    if (-not $release) { Stop-Install "could not find a Windows Go toolchain to download" }
+    $zip = Join-Path $env:TEMP ("go-" + [guid]::NewGuid().ToString("N") + ".zip")
+    try {
+        Invoke-WebRequest -UseBasicParsing -Uri ("https://go.dev/dl/" + $release.filename) -OutFile $zip -Headers @{ "User-Agent" = "claude-custom-installer" }
+        New-Item -ItemType Directory -Force -Path (Join-Path $env:LOCALAPPDATA "claude-custom") | Out-Null
+        Expand-Archive -LiteralPath $zip -DestinationPath (Join-Path $env:LOCALAPPDATA "claude-custom") -Force
+        Ok "Go toolchain installed: $($release.filename)"
+    } catch {
+        Stop-Install "could not install the Go toolchain. Underlying error: $($_.Exception.Message)"
+    } finally {
+        Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
+    }
+    $go = Join-Path $env:LOCALAPPDATA "claude-custom\go\bin\go.exe"
+    if (-not (Test-Path $go)) { Stop-Install "the Go toolchain did not unpack as expected" }
+    return $go
+}
+
+function Build-FromSource([string]$Tag) {
+    $go = Install-GoToolchain
+    $tmp = Join-Path $env:TEMP ("claude-custom-src-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $tmp | Out-Null
+    try {
+        $archive = Join-Path $tmp "source.zip"
+        $ref = if ($Tag -match "^(v?\d|v\d)") { "tags/$Tag" } else { "heads/$Tag" }
+        Say "    Downloading source ($Tag)"
+        try {
+            Invoke-WebRequest -UseBasicParsing -Uri "https://codeload.github.com/$Repo/zip/refs/$ref" -OutFile $archive -Headers @{ "User-Agent" = "claude-custom-installer" }
+        } catch {
+            Stop-Install "could not download the source archive for $Tag. Underlying error: $($_.Exception.Message)"
+        }
+        Expand-Archive -LiteralPath $archive -DestinationPath $tmp -Force
+        $root = Get-ChildItem -LiteralPath $tmp -Directory | Select-Object -First 1
+        if (-not $root) { Stop-Install "the source archive did not contain the project" }
+
+        New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+        $target = Join-Path $InstallDir "claude-custom.exe"
+        $env:CGO_ENABLED = "0"
+        $env:GOTELEMETRY = "off"
+        $env:GOFLAGS = ""
+        Say "    Building claude-custom locally (this takes a moment)"
+        Push-Location $root.FullName
+        try {
+            & $go build -trimpath -ldflags "-s -w" -o $target ./cmd/claude-custom 2>&1 | ForEach-Object { Say "    $_" }
+            if ($LASTEXITCODE -ne 0) { Stop-Install "the local build failed (exit $LASTEXITCODE)" }
+        } finally {
+            Pop-Location
+        }
+        if (-not (Test-Path $target)) { Stop-Install "the local build produced no binary" }
+        try { Unblock-File -LiteralPath $target -ErrorAction Stop } catch { }
+        Ok "Built $target"
+        return $target
+    } finally {
+        Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Add-ToUserPath {
     $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
     $entries = @()
@@ -286,16 +375,40 @@ try {
     if ((Test-ProtectedDir $InstallDir) -and -not (Test-Admin)) {
         Stop-Install "installing to $InstallDir needs an elevated PowerShell (Run as Administrator)"
     }
-    $tag = Resolve-Release
-    Ok "Latest release: $tag"
-    $exe = Install-Binary $tag
+    $exe = Join-Path $InstallDir "claude-custom.exe"
+    $tag = $null
+    $fromRelease = $false
+    if (-not $BuildFromSource) {
+        try {
+            $tag = Resolve-Release
+            Ok "Latest release: $tag"
+            $exe = Install-Binary $tag
+            $fromRelease = $true
+        } catch {
+            Warn "the prebuilt binary could not be installed: $($_.Exception.Message)"
+            Warn "Building claude-custom from source instead"
+            $tag = $null
+        }
+    }
     Add-ToUserPath
 
     Step "Checking the installation"
-    $check = Invoke-VersionCheck $exe
+    $check = if ($fromRelease -and (Test-Path $exe)) { Invoke-VersionCheck $exe } else { $null }
+
+    if ($BuildFromSource -or -not $fromRelease -or ($check -and $check.Blocked)) {
+        if ($check -and $check.Blocked) {
+            Warn "Windows Application Control blocked the prebuilt binary; building it locally instead"
+        }
+        if (-not $tag) {
+            try { $tag = Resolve-Release } catch { $tag = "main" }
+        }
+        $exe = Build-FromSource $tag
+        $check = Invoke-VersionCheck $exe
+    }
+
     if ($check.Blocked) {
         Show-AppControlHelp $exe
-        Stop-Install "the installed binary is blocked by Windows Application Control"
+        Stop-Install "both the downloaded and the locally built binary are blocked by Windows Application Control"
     }
     if (-not $check.Ok) {
         Stop-Install "the installed binary did not run: $($check.Error)"

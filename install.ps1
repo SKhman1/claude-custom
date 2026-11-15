@@ -271,29 +271,50 @@ function Install-NodePackage([string]$Ref) {
         Stop-Install "Node.js 18 or newer is required for the Node runtime. Install it from https://nodejs.org and rerun this installer."
     }
     if (-not $Ref) { $Ref = "main" }
-    $refPath = if ($Ref -match '^v\d') { "refs/tags/$Ref" } else { "refs/heads/$Ref" }
-    $url = "https://codeload.github.com/$Repo/zip/$refPath"
     Ok "Node $(& $node --version) found at $node"
-    Say "    Downloading the Node build ($Ref)"
     Say "    It runs inside signed node.exe, so Application Control allows it"
 
     $root = Join-Path $env:LOCALAPPDATA "claude-custom"
     $dest = Join-Path $root "node"
-    $tmp = Join-Path $env:TEMP ("claude-custom-node-" + [guid]::NewGuid().ToString("N"))
-    New-Item -ItemType Directory -Path $tmp -Force | Out-Null
-    try {
-        $zip = Join-Path $tmp "package.zip"
-        Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $zip -Headers @{ "User-Agent" = "claude-custom-installer" }
-        Expand-Archive -LiteralPath $zip -DestinationPath $tmp -Force
-        $inner = Get-ChildItem -LiteralPath $tmp -Directory | Select-Object -First 1
-        if (-not $inner -or -not (Test-Path (Join-Path $inner.FullName "bin\claude-custom.js"))) {
-            Stop-Install "the downloaded package does not contain bin/claude-custom.js"
+    $script = $null
+
+    $npm = Get-Command npm -ErrorAction SilentlyContinue
+    if ($npm) {
+        $spec = "claude-custom@latest"
+        if ($Ref -match '^v?(\d+\.\d+\.\d+.*)$') { $spec = "claude-custom@$($Matches[1])" }
+        Say "    Running: npm install -g --prefix `"$dest`" $spec"
+        $npmCode = Invoke-Native "npm" @("install", "-g", "--prefix", $dest, $spec, "--no-fund", "--no-audit")
+        $candidate = Join-Path $dest "node_modules\claude-custom\bin\claude-custom.js"
+        if ($npmCode -eq 0 -and (Test-Path $candidate)) {
+            $script = $candidate
+        } else {
+            Warn "npm install did not complete (exit $npmCode); falling back to the GitHub archive"
         }
-        if (Test-Path $dest) { Remove-Item -LiteralPath $dest -Recurse -Force }
-        New-Item -ItemType Directory -Path $dest -Force | Out-Null
-        Copy-Item -Path (Join-Path $inner.FullName "*") -Destination $dest -Recurse -Force
-    } finally {
-        Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    } else {
+        Warn "npm was not found; using the GitHub archive"
+    }
+
+    if (-not $script) {
+        $refPath = if ($Ref -match '^v\d') { "refs/tags/$Ref" } else { "refs/heads/$Ref" }
+        $url = "https://codeload.github.com/$Repo/zip/$refPath"
+        Say "    Downloading the Node build ($Ref)"
+        $tmp = Join-Path $env:TEMP ("claude-custom-node-" + [guid]::NewGuid().ToString("N"))
+        New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+        try {
+            $zip = Join-Path $tmp "package.zip"
+            Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $zip -Headers @{ "User-Agent" = "claude-custom-installer" }
+            Expand-Archive -LiteralPath $zip -DestinationPath $tmp -Force
+            $inner = Get-ChildItem -LiteralPath $tmp -Directory | Select-Object -First 1
+            if (-not $inner -or -not (Test-Path (Join-Path $inner.FullName "bin\claude-custom.js"))) {
+                Stop-Install "the downloaded package does not contain bin/claude-custom.js"
+            }
+            if (Test-Path $dest) { Remove-Item -LiteralPath $dest -Recurse -Force }
+            New-Item -ItemType Directory -Path $dest -Force | Out-Null
+            Copy-Item -Path (Join-Path $inner.FullName "*") -Destination $dest -Recurse -Force
+            $script = Join-Path $dest "bin\claude-custom.js"
+        } finally {
+            Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
 
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
@@ -302,7 +323,6 @@ function Install-NodePackage([string]$Ref) {
         try { Move-Item -LiteralPath $blockedExe -Destination "$blockedExe.blocked" -Force } catch { }
     }
     $shim = Join-Path $InstallDir "claude-custom.cmd"
-    $script = Join-Path $dest "bin\claude-custom.js"
     $lines = @(
         "@echo off",
         "`"$node`" `"$script`" %*"

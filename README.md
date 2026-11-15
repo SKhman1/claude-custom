@@ -98,10 +98,10 @@ PowerShell:
 .\install.ps1 -InstallDir "C:\Program Files\claude-custom"
 ```
 
-The Node.js build is also installable without the script:
+The Node.js build is on npm, so it can be installed without the script too:
 
 ```powershell
-npm install -g https://codeload.github.com/SKhman1/claude-custom/zip/refs/heads/main
+npm install -g claude-custom
 claude-custom
 ```
 

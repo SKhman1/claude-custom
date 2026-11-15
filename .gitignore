@@ -1,5 +1,6 @@
 # build output
-/bin/
+/bin/*
+!/bin/claude-custom.js
 *.exe
 *.test
 *.out

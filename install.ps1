@@ -34,10 +34,11 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$InstallDir = (Join-Path $env:LOCALAPPDATA "claude-custom\bin"),
-    [switch]$BuildFromSource,
-    [switch]$SkipSetup,
-    [switch]$SkipClaudeCode
+[string]$InstallDir = (Join-Path $env:LOCALAPPDATA "claude-custom\bin"),
+[switch]$BuildFromSource,
+[switch]$SkipSetup,
+[switch]$SkipClaudeCode,
+[ValidateSet("auto", "binary", "node")][string]$Runtime = "auto"
 )
 
 $ErrorActionPreference = "Stop"
@@ -140,12 +141,16 @@ function Show-AppControlHelp([string]$Exe) {
     $programFilesDir = Join-Path $env:ProgramFiles "claude-custom"
     Say ""
     Say "    Options:" "Yellow"
-    Say "      1. Allow the app. Windows Security > App & browser control >" "Gray"
+    Say "      1. Use the Node build, which runs inside signed node.exe and is" "Gray"
+    Say "         not affected by Application Control:" "Gray"
+    Say "           .\install.ps1 -Runtime node" "Gray"
+    Say "         (requires Node.js 18+; setup continues normally)" "Gray"
+    Say "      2. Allow the app. Windows Security > App & browser control >" "Gray"
     Say "         Smart App Control, or ask IT to allow the file (hash below)." "Gray"
-    Say "      2. Install into a policy-allowed folder from an elevated" "Gray"
+    Say "      3. Install into a policy-allowed folder from an elevated" "Gray"
     Say "         PowerShell:" "Gray"
     Say "           .\install.ps1 -InstallDir `"$programFilesDir`"" "Gray"
-    Say "      3. Use a machine without the policy, or run Claude Code on WSL." "Gray"
+    Say "      4. Use a machine without the policy, or run Claude Code on WSL." "Gray"
 
     try {
         $hash = (Get-FileHash -LiteralPath $Exe -Algorithm SHA256).Hash
@@ -247,6 +252,65 @@ function Ensure-ClaudeCode {
     Ok "Claude Code installed: $claude"
 }
 
+function Get-NodeExe {
+    $node = Get-Command node -ErrorAction SilentlyContinue
+    if (-not $node) { return $null }
+    $ErrorActionPreference = "Continue"
+    $version = & $node.Source --version 2>$null
+    $ErrorActionPreference = "Stop"
+    if (-not $version) { return $null }
+    $major = 0
+    if ($version -match '^v(\d+)') { $major = [int]$Matches[1] }
+    if ($major -lt 18) { return $null }
+    return $node.Source
+}
+
+function Install-NodePackage([string]$Ref) {
+    $node = Get-NodeExe
+    if (-not $node) {
+        Stop-Install "Node.js 18 or newer is required for the Node runtime. Install it from https://nodejs.org and rerun this installer."
+    }
+    if (-not $Ref) { $Ref = "main" }
+    $refPath = if ($Ref -match '^v\d') { "refs/tags/$Ref" } else { "refs/heads/$Ref" }
+    $url = "https://codeload.github.com/$Repo/zip/$refPath"
+    Ok "Node $(& $node --version) found at $node"
+    Say "    Downloading the Node build ($Ref)"
+    Say "    It runs inside signed node.exe, so Application Control allows it"
+
+    $root = Join-Path $env:LOCALAPPDATA "claude-custom"
+    $dest = Join-Path $root "node"
+    $tmp = Join-Path $env:TEMP ("claude-custom-node-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+    try {
+        $zip = Join-Path $tmp "package.zip"
+        Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $zip -Headers @{ "User-Agent" = "claude-custom-installer" }
+        Expand-Archive -LiteralPath $zip -DestinationPath $tmp -Force
+        $inner = Get-ChildItem -LiteralPath $tmp -Directory | Select-Object -First 1
+        if (-not $inner -or -not (Test-Path (Join-Path $inner.FullName "bin\claude-custom.js"))) {
+            Stop-Install "the downloaded package does not contain bin/claude-custom.js"
+        }
+        if (Test-Path $dest) { Remove-Item -LiteralPath $dest -Recurse -Force }
+        New-Item -ItemType Directory -Path $dest -Force | Out-Null
+        Copy-Item -Path (Join-Path $inner.FullName "*") -Destination $dest -Recurse -Force
+    } finally {
+        Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+    $blockedExe = Join-Path $InstallDir "claude-custom.exe"
+    if (Test-Path $blockedExe) {
+        try { Move-Item -LiteralPath $blockedExe -Destination "$blockedExe.blocked" -Force } catch { }
+    }
+    $shim = Join-Path $InstallDir "claude-custom.cmd"
+    $script = Join-Path $dest "bin\claude-custom.js"
+    $lines = @(
+        "@echo off",
+        "`"$node`" `"$script`" %*"
+    )
+    [IO.File]::WriteAllText($shim, ($lines -join "`r`n") + "`r`n", (New-Object System.Text.AsciiEncoding))
+    Ok "Installed $shim"
+    return $shim
+}
 function Install-Binary([string]$Tag) {
     $suffix = Get-ArchSuffix
     $asset = "claude-custom_$suffix.exe"
@@ -393,12 +457,35 @@ try {
     if ((Test-ProtectedDir $InstallDir) -and -not (Test-Admin)) {
         Stop-Install "installing to $InstallDir needs an elevated PowerShell (Run as Administrator)"
     }
-    $exe = Join-Path $InstallDir "claude-custom.exe"
     $tag = $null
+    try { $tag = Resolve-Release } catch { }
+
+    if ($Runtime -eq "node") {
+        $shim = Install-NodePackage "main"
+        Add-ToUserPath
+        $check = Invoke-VersionCheck $shim
+        if (-not $check.Ok) {
+            Stop-Install "the Node build did not run: $($check.Error)"
+        }
+        Ok $check.Output
+        if ($SkipSetup) {
+            Step "Done"
+            Say "    Skipped setup because -SkipSetup was used." "Yellow"
+            Say "    Start it with: claude-custom setup" "Yellow"
+            return
+        }
+        Step "Starting claude-custom setup"
+        & $shim setup
+        Say ""
+        Ok "Setup finished. Launch Claude Code with: claude-custom"
+        return
+    }
+
+    $exe = Join-Path $InstallDir "claude-custom.exe"
     $fromRelease = $false
     if (-not $BuildFromSource) {
         try {
-            $tag = Resolve-Release
+            if (-not $tag) { Stop-Install "could not read the latest release" }
             Ok "Latest release: $tag"
             $exe = Install-Binary $tag
             $fromRelease = $true
@@ -420,11 +507,58 @@ try {
         if (-not $tag) {
             try { $tag = Resolve-Release } catch { $tag = "main" }
         }
-        $exe = Build-FromSource $tag
-        $check = Invoke-VersionCheck $exe
+        $buildError = $null
+        try {
+            $exe = Build-FromSource $tag
+            $check = Invoke-VersionCheck $exe
+        } catch {
+            $buildError = $_
+            $check = $null
+        }
+        if ($buildError -or -not $check) {
+            if (Get-NodeExe) {
+                Warn "the local build failed; using the Node build instead (it needs no code signing)"
+                $shim = Install-NodePackage "main"
+                $check = Invoke-VersionCheck $shim
+                if (-not $check.Ok) { Stop-Install "the Node build did not run: $($check.Error)" }
+                Ok $check.Output
+                if ($SkipSetup) {
+                    Step "Done"
+                    Say "    Skipped setup because -SkipSetup was used." "Yellow"
+                    Say "    Start it with: claude-custom setup" "Yellow"
+                    return
+                }
+                Step "Starting claude-custom setup"
+                & $shim setup
+                Say ""
+                Ok "Setup finished. Launch Claude Code with: claude-custom"
+                return
+            }
+            if ($buildError) { Stop-Install "build from source failed: $($buildError.Exception.Message)" }
+            Stop-Install "the installed binary did not run: $($check.Error)"
+        }
     }
 
     if ($check.Blocked) {
+        if (Get-NodeExe) {
+            Warn "Windows Application Control blocks unsigned executables on this machine"
+            Warn "Installing the Node build instead (it runs inside signed node.exe)"
+            $shim = Install-NodePackage "main"
+            $check = Invoke-VersionCheck $shim
+            if (-not $check.Ok) { Stop-Install "the Node build did not run: $($check.Error)" }
+            Ok $check.Output
+            if ($SkipSetup) {
+                Step "Done"
+                Say "    Skipped setup because -SkipSetup was used." "Yellow"
+                Say "    Start it with: claude-custom setup" "Yellow"
+                return
+            }
+            Step "Starting claude-custom setup"
+            & $shim setup
+            Say ""
+            Ok "Setup finished. Launch Claude Code with: claude-custom"
+            return
+        }
         Show-AppControlHelp $exe
         Stop-Install "both the downloaded and the locally built binary are blocked by Windows Application Control"
     }

@@ -39,6 +39,14 @@ The installer:
 
 Nothing else has to be installed by hand — no Go toolchain, no manual config.
 
+If Windows Application Control blocks unsigned executables on the machine, the
+installer automatically switches to the Node.js build, which runs inside signed
+`node.exe` and is therefore allowed. You can also choose it directly:
+
+```powershell
+.\install.ps1 -Runtime node
+```
+
 To install without launching setup, save the script and run:
 
 ```powershell
@@ -70,15 +78,18 @@ go build -trimpath -ldflags "-s -w" -o bin/claude-custom ./cmd/claude-custom
 **"An Application Control policy has blocked this file"**
 
 Windows Smart App Control, WDAC, or AppLocker is refusing the prebuilt
-unsigned binary. The installer handles this automatically: it downloads the Go
-toolchain and builds claude-custom locally, which these policies generally
-allow. You can also force that route directly:
+unsigned binary. The installer handles this automatically: it first downloads
+the Go toolchain and builds claude-custom locally, which these policies
+generally allow. If the locally built binary is blocked too, it installs the
+Node.js build instead — `node.exe` is signed, so policy allows running
+claude-custom inside it. You can force either route directly:
 
 ```powershell
 .\install.ps1 -BuildFromSource
+.\install.ps1 -Runtime node
 ```
 
-If the machine blocks locally built binaries too, the installer prints the
+If neither route works and the machine has no Node.js, the installer prints the
 policy state and the SHA-256 so IT can add an allow rule. Path-based AppLocker
 policies can instead be satisfied by installing elsewhere from an elevated
 PowerShell:
@@ -87,11 +98,26 @@ PowerShell:
 .\install.ps1 -InstallDir "C:\Program Files\claude-custom"
 ```
 
+The Node.js build is also installable without the script:
+
+```powershell
+npm install -g https://codeload.github.com/SKhman1/claude-custom/zip/refs/heads/main
+claude-custom
+```
+
+**Node.js build differences**
+
+The Node.js build behaves like the binary, with two differences: API keys are
+stored in `~/.claude-custom/secrets.json` instead of the Windows Credential
+Manager (keys saved there by the binary are still read automatically), and
+`HTTP(S)_PROXY` environment variables are not honored.
+
 **`claude-custom` is not recognized**
 
 The installer appends its folder to your user `PATH`; already-open terminals
 do not see the change. Open a new terminal, or run the full path
-`%LOCALAPPDATA%\claude-custom\bin\claude-custom.exe`.
+`%LOCALAPPDATA%\claude-custom\bin\claude-custom.exe` (or `claude-custom.cmd`
+for the Node.js build).
 
 ## Quick start
 

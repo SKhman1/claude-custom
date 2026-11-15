@@ -1,0 +1,32 @@
+{
+  "name": "claude-custom",
+  "version": "0.1.0",
+  "description": "Run Claude Code against any OpenAI-compatible model through a local proxy",
+  "license": "MIT",
+  "bin": {
+    "claude-custom": "bin/claude-custom.js"
+  },
+  "files": [
+    "bin/claude-custom.js",
+    "src",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node bin/claude-custom.js"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "anthropic",
+    "openai",
+    "proxy",
+    "llm"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SKhman1/claude-custom.git"
+  }
+}

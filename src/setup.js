@@ -36,8 +36,8 @@ function hostLabel(preset) {
 }
 
 async function promptProvider() {
-  const items = catalog.presets.map((preset) => `${preset.name}  ${ui.dim(hostLabel(preset))}`);
-  const index = await prompt.choose("Choose a provider", items, 0);
+  const items = catalog.presets.map((preset) => ({ label: preset.name, detail: hostLabel(preset), value: preset.id }));
+  const index = await prompt.choose("Choose a provider", items, 0, { search: true, pageSize: 14 });
   if (index < 0) throw new prompt.CancelledError();
   return catalog.presets[index];
 }
@@ -54,7 +54,7 @@ function contextLabel(tokens) {
 async function promptModelWithDefault(models, current) {
   const selected = String(current || "").trim();
   if (!models.length) return prompt.ask("Model ID", selected);
-  const labels = [];
+  const items = [];
   let haveCurrent = selected === "";
   let defaultIndex = 0;
   for (const model of models) {
@@ -65,21 +65,25 @@ async function promptModelWithDefault(models, current) {
     if (selected && model.id === selected) {
       detail = detail ? `${detail}  current` : "current";
       if (!haveCurrent) {
-        defaultIndex = labels.length;
+        defaultIndex = items.length;
         haveCurrent = true;
       }
     }
-    labels.push(detail ? `${model.id}  ${ui.dim(detail)}` : model.id);
+    items.push({ label: model.id, detail, value: model.id });
   }
   if (!haveCurrent && selected) {
-    labels.push(`${selected}  ${ui.dim("current")}`);
-    defaultIndex = labels.length - 1;
+    items.push({ label: selected, detail: "current", value: selected });
+    defaultIndex = items.length - 1;
   }
-  labels.push("Enter model ID manually");
-  const index = await prompt.choose("Choose a model (Enter keeps the current one)", labels, defaultIndex);
+  items.push({ label: "Enter model ID manually", detail: "type any model identifier", value: "__manual__" });
+  const index = await prompt.choose("Choose a model (Enter keeps the current one)", items, defaultIndex, {
+    search: true,
+    pageSize: 12,
+  });
   if (index < 0) throw new prompt.CancelledError();
-  if (index === labels.length - 1) return prompt.ask("Model ID", selected);
-  return models[index].id;
+  const chosen = items[index].value;
+  if (chosen === "__manual__") return prompt.ask("Model ID", selected);
+  return chosen;
 }
 
 function welcome() {

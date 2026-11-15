@@ -795,10 +795,10 @@ async function chooseLaunchProfile(cfg) {
       detail = `default  ${detail}`;
       defaultIndex = labels.length;
     }
-    labels.push(`${name}  ${dim(detail)}`);
+    labels.push({ label: name, detail, value: name });
   }
-  labels.push(`Configure another provider  ${dim("add or change provider, model, or API key")}`);
-  const index = await prompt.choose("Launch Claude Code", labels, defaultIndex);
+  labels.push({ label: "Configure another provider", detail: "add or change provider, model, or API key", value: CONFIGURE_VALUE });
+  const index = await prompt.choose("Launch Claude Code", labels, defaultIndex, { search: false });
   if (index < 0) throw new prompt.CancelledError();
   if (index === labels.length - 1) return { name: "", configure: true };
   return { name: names[index], configure: false };
@@ -812,8 +812,12 @@ async function pickProfile(cfg, current) {
     return reloaded.default_profile;
   }
   const names = sortedProfileNames(cfg);
-  const labels = names.map((name) => (name === current ? `${name}  ${dim("default")}` : name));
-  const index = await prompt.choose("Choose a profile", labels, 0);
+  const items = names.map((name) => ({
+    label: name,
+    detail: name === current ? "default" : "",
+    value: name,
+  }));
+  const index = await prompt.choose("Choose a profile", items, 0, { search: false });
   if (index < 0) throw new prompt.CancelledError();
   const name = names[index];
   await rechooseModel(cfg, name);
@@ -917,6 +921,7 @@ async function defaultCommand() {
 
 module.exports = {
   defaultCommand,
+  setupCommand,
   launchClaude,
   runCommand,
   serveCommand,

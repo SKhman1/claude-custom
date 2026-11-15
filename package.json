@@ -1,6 +1,6 @@
 {
   "name": "claude-custom",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Run Claude Code against any OpenAI-compatible model through a local proxy",
   "license": "MIT",
   "bin": {

@@ -141,8 +141,7 @@ claude-custom run -- --resume   # everything after -- goes to claude unchanged
 claude-custom setup          # change provider or model
 ```
 
-The first-run picker asks for a provider and a model, validates the key against
-the provider's model list, and saves a profile. Nothing is preselected.
+The first-run picker asks for a provider and a model with arrow keys, `↑`/`↓` to move and type to search, validates your key, and saves a profile. Nothing is preselected.
 
 ## Commands
 

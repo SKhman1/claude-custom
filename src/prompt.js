@@ -28,10 +28,17 @@ function ask(question, defaultValue) {
   const suffix = defaultValue ? ` [${defaultValue}]` : "";
   return new Promise((resolve, reject) => {
     const reader = interfaceFor();
+    let settled = false;
+    const done = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
     reader.question(`${question}${suffix}: `, (answer) => {
       const text = String(answer).trim();
-      resolve(text === "" ? defaultValue || "" : text);
+      done(text === "" ? defaultValue || "" : text);
     });
+    reader.once("close", () => done(defaultValue || ""));
     reader.once("SIGINT", () => {
       close();
       reject(new CancelledError());
@@ -101,11 +108,30 @@ function confirm(question, defaultYes) {
   });
 }
 
-async function choose(title, items, defaultIndex) {
+async function choose(title, items, defaultIndex, options) {
   if (!items.length) return -1;
+  const tui = require("./tui.js");
+  const settings = options || {};
+  if (tui.tuiAvailable()) {
+    try {
+      const index = await tui.selectMenu({
+        title,
+        items,
+        defaultIndex,
+        search: settings.search !== false,
+        pageSize: settings.pageSize,
+      });
+      return index;
+    } catch (err) {
+      if (err && err.code === "CANCELED") throw new CancelledError();
+      throw err;
+    }
+  }
   process.stdout.write(`${title}\n`);
   items.forEach((item, index) => {
-    process.stdout.write(`  ${index + 1}. ${item}\n`);
+    const label = typeof item === "string" ? item : item.label;
+    const detail = typeof item === "string" ? "" : item.detail;
+    process.stdout.write(`  ${index + 1}. ${label}${detail ? `  ${detail}` : ""}\n`);
   });
   const initial = defaultIndex >= 0 && defaultIndex < items.length ? defaultIndex : 0;
   for (;;) {

@@ -19,38 +19,50 @@ environment. No provider needs to expose an Anthropic endpoint.
 - Stream recovery: early holdback plus continuation requests to survive mid-stream disconnects.
 - Claude Code timeout/watchdog overrides so long generations and long sessions are not cut off.
 - API keys in the OS keyring (Windows Credential Manager, macOS Keychain, Secret Service) with an explicit local-file fallback.
-- Single static binary. No Python, no Node, no telemetry.
+- Single static binary, or an npm build that runs inside signed `node.exe` where unsigned executables are blocked. No Python, no telemetry.
 
 ## Install (Windows)
 
-One line in PowerShell:
+Paste this one line into PowerShell and press Enter:
 
 ```powershell
 irm https://raw.githubusercontent.com/SKhman1/claude-custom/main/install.ps1 | iex
 ```
 
-The installer:
+That is the whole installation. The script:
 
-1. Checks Windows, PowerShell, and CPU architecture.
-2. Checks for Claude Code and installs it with npm (installing Node.js LTS via winget first if needed).
-3. Downloads the latest `claude-custom` release binary for your architecture.
-4. Installs it to `%LOCALAPPDATA%\claude-custom\bin` and adds that directory to your user `PATH`.
-5. Starts `claude-custom setup`.
+1. Installs Claude Code if it is missing (Node.js LTS via winget first, if needed).
+2. Installs `claude-custom` to `%LOCALAPPDATA%\claude-custom\bin` and adds it to your user `PATH`.
+3. Starts the setup wizard: pick a provider, paste an API key, pick a model.
+4. Launches Claude Code through that provider.
 
-Nothing else has to be installed by hand — no Go toolchain, no manual config.
-
-If Windows Application Control blocks unsigned executables on the machine, the
-installer automatically switches to the Node.js build, which runs inside signed
-`node.exe` and is therefore allowed. You can also choose it directly:
+When the wizard ends you are already in a working Claude Code session. After
+that, one command is enough:
 
 ```powershell
-.\install.ps1 -Runtime node
+claude-custom        # reuse the saved profile, launch Claude Code
 ```
 
-To install without launching setup, save the script and run:
+No Go toolchain, no config file editing, no environment variables.
+
+Non-interactive install (skip the wizard, e.g. for provisioning):
 
 ```powershell
 .\install.ps1 -SkipSetup
+```
+
+If Windows Application Control (Smart App Control, WDAC, AppLocker) blocks
+unsigned executables, the installer switches to the npm build automatically,
+which runs inside signed `node.exe` and is allowed. Full details are under
+[Troubleshooting](#troubleshooting).
+
+### npm instead of the script
+
+The same build is on npm:
+
+```powershell
+npm install -g claude-custom
+claude-custom setup
 ```
 
 ### Build from source
@@ -121,14 +133,16 @@ for the Node.js build).
 
 ## Quick start
 
+The installer ends inside a running session. Afterwards:
+
 ```powershell
-claude-custom            # first run: pick provider, paste key, pick model, launch
-claude-custom run        # launch again with the saved profile
+claude-custom                # saved profile, launch Claude Code
 claude-custom run -- --resume   # everything after -- goes to claude unchanged
+claude-custom setup          # change provider or model
 ```
 
-The picker asks for a provider and a model, validates the key against the
-provider's model list, and saves a profile. Nothing is preselected.
+The first-run picker asks for a provider and a model, validates the key against
+the provider's model list, and saves a profile. Nothing is preselected.
 
 ## Commands
 

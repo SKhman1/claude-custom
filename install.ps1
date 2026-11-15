@@ -13,9 +13,14 @@
     1. Checks Windows, PowerShell, and CPU architecture.
     2. Checks Claude Code and installs it with npm when missing.
     3. Downloads the latest claude-custom release binary.
-    4. Installs it to %LOCALAPPDATA%\claude-custom\bin and adds that to PATH.
+    4. Installs it to %LOCALAPPDATA%\claude-custom\bin (or -InstallDir)
+       and adds that folder to PATH.
     5. Starts `claude-custom setup`.
 
+.PARAMETER InstallDir
+  Install somewhere else, for example "C:\Program Files\claude-custom".
+  Required when a Windows Application Control policy blocks the default
+  user-profile location; use an elevated PowerShell for protected folders.
 .PARAMETER SkipSetup
   Install the binary but do not start the interactive setup.
 .PARAMETER SkipClaudeCode
@@ -23,6 +28,7 @@
 #>
 [CmdletBinding()]
 param(
+    [string]$InstallDir = (Join-Path $env:LOCALAPPDATA "claude-custom\bin"),
     [switch]$SkipSetup,
     [switch]$SkipClaudeCode
 )
@@ -31,7 +37,7 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
 $Repo = "SKhman1/claude-custom"
-$InstallDir = Join-Path $env:LOCALAPPDATA "claude-custom\bin"
+$InstallDir = [System.IO.Path]::GetFullPath($InstallDir).TrimEnd("\")
 
 function Say([string]$Message, [string]$Color = "Gray") {
     Write-Host $Message -ForegroundColor $Color
@@ -52,6 +58,78 @@ function Warn([string]$Message) {
 
 function Stop-Install([string]$Message) {
     throw [System.InvalidOperationException]::new($Message)
+}
+
+function Test-Admin {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Test-ProtectedDir([string]$Path) {
+    $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:WINDIR) | Where-Object { $_ }
+    foreach ($root in $roots) {
+        if ($Path.StartsWith($root.TrimEnd("\"), [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+    }
+    return $false
+}
+
+function Invoke-VersionCheck([string]$Exe) {
+    $result = [pscustomobject]@{ Ok = $false; Output = $null; Blocked = $false; Error = $null }
+    try {
+        $out = & $Exe version 2>&1
+        $code = $LASTEXITCODE
+        $text = ("$out" -replace "\s+", " ").Trim()
+        if ($code -eq 0 -and $text) {
+            $result.Ok = $true
+            $result.Output = $text
+            return $result
+        }
+        $result.Error = if ($text) { $text } else { "exit code $code" }
+    } catch {
+        $result.Error = $_.Exception.Message
+    }
+    if ($result.Error -match "Application Control|blocked this file|0x800704EC|0x800704E5") {
+        $result.Blocked = $true
+    }
+    return $result
+}
+
+function Show-AppControlHelp([string]$Exe) {
+    Say ""
+    Say "Windows Application Control blocked this file:" "Red"
+    Say "    $Exe" "Red"
+    Say ""
+    Say "    This is a Windows or organization policy (Smart App Control, WDAC" "Gray"
+    Say "    or AppLocker) blocking an unsigned executable. It is not an" "Gray"
+    Say "    installer failure, and the same policy will block the app when" "Gray"
+    Say "    you start it by hand." "Gray"
+
+    $sac = $null
+    try {
+        $sac = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy" -Name "VerifiedAndReputablePolicyState" -ErrorAction Stop).VerifiedAndReputablePolicyState
+    } catch { }
+    if ($null -ne $sac) {
+        $label = switch ([int]$sac) { 0 { "off" } 1 { "enforced" } 2 { "evaluation" } default { "state $sac" } }
+        Say ""
+        Say "    Smart App Control: $label" "Gray"
+    }
+
+    $programFilesDir = Join-Path $env:ProgramFiles "claude-custom"
+    Say ""
+    Say "    Options:" "Yellow"
+    Say "      1. Allow the app. Windows Security > App & browser control >" "Gray"
+    Say "         Smart App Control, or ask IT to allow the file (hash below)." "Gray"
+    Say "      2. Install into a policy-allowed folder from an elevated" "Gray"
+    Say "         PowerShell:" "Gray"
+    Say "           .\install.ps1 -InstallDir `"$programFilesDir`"" "Gray"
+    Say "      3. Use a machine without the policy, or run Claude Code on WSL." "Gray"
+
+    try {
+        $hash = (Get-FileHash -LiteralPath $Exe -Algorithm SHA256).Hash
+        Say ""
+        Say "    SHA-256: $hash" "Gray"
+    } catch { }
 }
 
 function Get-ArchSuffix {
@@ -159,6 +237,7 @@ function Install-Binary([string]$Tag) {
         if (-not (Test-Path $downloaded)) {
             Stop-Install "the release asset $asset was not found in $Tag"
         }
+        try { Unblock-File -LiteralPath $downloaded -ErrorAction Stop } catch { }
         New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
         $target = Join-Path $InstallDir "claude-custom.exe"
         try {
@@ -166,6 +245,7 @@ function Install-Binary([string]$Tag) {
         } catch {
             Stop-Install "could not replace $target. Close any running claude-custom process and rerun this installer. Underlying error: $($_.Exception.Message)"
         }
+        try { Unblock-File -LiteralPath $target -ErrorAction Stop } catch { }
         Ok "Installed $target"
         return $target
     } finally {
@@ -203,14 +283,24 @@ try {
     Ensure-ClaudeCode
 
     Step "Installing claude-custom"
+    if ((Test-ProtectedDir $InstallDir) -and -not (Test-Admin)) {
+        Stop-Install "installing to $InstallDir needs an elevated PowerShell (Run as Administrator)"
+    }
     $tag = Resolve-Release
     Ok "Latest release: $tag"
     $exe = Install-Binary $tag
     Add-ToUserPath
 
     Step "Checking the installation"
-    $version = & $exe version
-    Ok "$version"
+    $check = Invoke-VersionCheck $exe
+    if ($check.Blocked) {
+        Show-AppControlHelp $exe
+        Stop-Install "the installed binary is blocked by Windows Application Control"
+    }
+    if (-not $check.Ok) {
+        Stop-Install "the installed binary did not run: $($check.Error)"
+    }
+    Ok $check.Output
 
     if ($SkipSetup) {
         Step "Done"

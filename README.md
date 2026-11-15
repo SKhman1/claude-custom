@@ -65,6 +65,30 @@ On macOS/Linux:
 go build -trimpath -ldflags "-s -w" -o bin/claude-custom ./cmd/claude-custom
 ```
 
+## Troubleshooting
+
+**"An Application Control policy has blocked this file"**
+
+Windows Smart App Control, WDAC, or AppLocker is refusing to run the unsigned
+release binary. The installer detects this case and prints the current policy
+state plus the SHA-256 hash. Options:
+
+1. Allow it in Windows Security → App & browser control → Smart App Control, or
+   ask IT to allow the file hash.
+2. Install into a folder the policy allows, from an elevated PowerShell:
+
+   ```powershell
+   .\install.ps1 -InstallDir "C:\Program Files\claude-custom"
+   ```
+
+3. Run Claude Code on WSL or another machine without the policy.
+
+**`claude-custom` is not recognized**
+
+The installer appends its folder to your user `PATH`; already-open terminals
+do not see the change. Open a new terminal, or run the full path
+`%LOCALAPPDATA%\claude-custom\bin\claude-custom.exe`.
+
 ## Quick start
 
 ```powershell
